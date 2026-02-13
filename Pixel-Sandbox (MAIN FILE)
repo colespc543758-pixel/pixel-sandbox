@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pixel Sandbox: Definitive Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; color: #0f0; }
+        canvas { image-rendering: pixelated; display: block; }
+        #menu, #q-menu, #info-screen {
+            position: absolute; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.9); z-index: 100;
+        }
+        #q-menu, #info-screen { display: none; z-index: 150; }
+        .info-box { width: 80%; max-width: 600px; padding: 20px; border: 2px solid #0f0; background: #000; color: #0f0; overflow-y: auto; max-height: 80vh; }
+        .btn { width: 220px; padding: 12px; margin: 8px; background: #000; border: 2px solid #0f0; color: #0f0; cursor: pointer; text-align: center; }
+        .btn:hover { background: #0f0; color: #000; }
+        #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0f0; pointer-events: none; display: none; font-size: 12px; }
+        #status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-weight: bold; color: #ff8800; text-shadow: 2px 2px #000; }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1>SANDBOX_ULTIMATE_v16</h1>
+        <div class="btn" onclick="startGame('flat')">START FLAT MAP</div>
+        <div class="btn" onclick="startGame('tower')">START TOWER</div>
+        <div class="btn" onclick="toggleInfo(true)">GAME INFO</div>
+    </div>
+
+    <div id="info-screen">
+        <div class="info-box">
+            <h2 style="text-align: center;">--- MANUAL ---</h2>
+            <p><b>WASD/SPACE:</b> Move & Jump.</p>
+            <p><b>RIGHT CLICK:</b> Hold to grab objects with the Beam.</p>
+            <p><b>LEFT CLICK:</b> Spawn selected prop (if Enabled).</p>
+            <p><b>L KEY:</b> While grabbing a prop, press L to Freeze it (Blue).</p>
+            <p><b>P KEY:</b> Toggle Spawning ON/OFF.</p>
+            <p><b>Q KEY:</b> Open Spawn Menu to change props.</p>
+            <p><b>RAGDOLL:</b> Speed kills! High velocity makes you go limp.</p>
+            <div class="btn" onclick="toggleInfo(false)" style="width: 100%;">BACK TO MENU</div>
+        </div>
+    </div>
+
+    <div id="q-menu">
+        <h2>SPAWN MENU (Q)</h2>
+        <div class="btn" onclick="setSpawnType('box')">SQUARE PROP</div>
+        <div class="btn" onclick="setSpawnType('dummy')">SPAWN DUMMY</div>
+        <div class="btn" onclick="setSpawnType('heavy')">HEAVY BEAM</div>
+        <div class="btn" onclick="location.reload()" style="border-color: #f00; color: #f00;">RESET ALL</div>
+    </div>
+
+    <div id="ui"><b>AD</b>: Move | <b>SPACE</b>: Jump | <b>R-HOLD</b>: Beam | <b>L</b>: Freeze | <b>P</b>: Spawn | <b>Q</b>: Menu</div>
+    <div id="status">SPAWNING: ENABLED</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Mouse, MouseConstraint, Body, Events } = Matter;
+        let engine, render, playerEnt, mouseConstraint, beamActive = false;
+        let audioCtx, laserOsc, laserGain, currentSpawnType = 'box', isPaused = false, lastStepTime = 0, canSpawn = true;
+        let entities = [];
+
+        // --- AUDIO ENGINE ---
+        function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); startMusic(); } }
+        
+        function startMusic() {
+            const loop = () => {
+                const osc = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(110, audioCtx.currentTime); // Lo-fi Bass
+                osc.frequency.exponentialRampToValueAtTime(55, audioCtx.currentTime + 0.1);
+                g.gain.setValueAtTime(0.02, audioCtx.currentTime);
+                g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.4);
+                osc.connect(g); g.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+                setTimeout(loop, 800);
+            };
+            loop();
+        }
+
+        function playStep() {
+            initAudio(); const osc = audioCtx.createOscillator(); const g = audioCtx.createGain();
+            osc.frequency.setValueAtTime(60, audioCtx.currentTime); g.gain.setValueAtTime(0.03, audioCtx.currentTime);
+            g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+            osc.connect(g); g.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function playDeath() {
+            initAudio(); const osc = audioCtx.createOscillator(); const g = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.08, audioCtx.currentTime); g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.4);
+            osc.connect(g); g.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+        }
+
+        function playFreeze() {
+            initAudio(); const osc = audioCtx.createOscillator(); const g = audioCtx.createGain();
+            osc.frequency.setValueAtTime(500, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(900, audioCtx.currentTime + 0.1);
+            g.gain.setValueAtTime(0.04, audioCtx.currentTime); g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+            osc.connect(g); g.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function startLaser() {
+            initAudio(); laserOsc = audioCtx.createOscillator(); laserGain = audioCtx.createGain();
+            laserOsc.type = 'sawtooth'; laserOsc.connect(laserGain); laserGain.connect(audioCtx.destination);
+            laserGain.gain.setValueAtTime(0.015, audioCtx.currentTime); laserOsc.start();
+        }
+
+        function stopLaser() { if (laserOsc) { try { laserOsc.stop(); } catch(e){} laserOsc = null; } }
+
+        // --- CORE FUNCTIONS ---
+        function toggleInfo(show) { document.getElementById('info-screen').style.display = show ? 'flex' : 'none'; }
+
+        function createEntity(x, y, isPlayer = false) {
+            const body = Bodies.circle(x, y, 18, { friction: 0.9, restitution: 0, density: 0.002, render: { fillStyle: isPlayer ? '#0ff' : '#f44' } });
+            const weapon = Bodies.rectangle(x, y, 40, 10, { render: { fillStyle: '#ff8800' }, isSensor: true, collisionFilter: { group: -1 } });
+            const data = { body, weapon, isPlayer, alive: true };
+            entities.push(data);
+            Composite.add(engine.world, [body, weapon]);
+            return data;
+        }
+
+        function kill(ent) {
+            if (!ent.alive) return;
+            ent.alive = false; playDeath();
+            Body.setAngularVelocity(ent.body, (Math.random()-0.5) * 0.4);
+            ent.weapon.isSensor = false;
+            Body.setVelocity(ent.weapon, { x: (Math.random()-0.5)*10, y: -5 });
+        }
+
+        function startGame(mapType) {
+            initAudio();
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            engine = Engine.create(); engine.world.gravity.y = 0.5;
+            render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#111' } });
+
+            playerEnt = createEntity(window.innerWidth/2, window.innerHeight-100, true);
+            const ground = Bodies.rectangle(window.innerWidth/2, window.innerHeight-10, 5000, 40, { isStatic: true, isFloor: true, render: { fillStyle: '#333' } });
+            Composite.add(engine.world, ground);
+
+            if (mapType === 'tower') {
+                const l = Bodies.rectangle(window.innerWidth/2-300, 0, 40, 9999, { isStatic: true, isFloor: true, render: { fillStyle: '#222' } });
+                const r = Bodies.rectangle(window.innerWidth/2+300, 0, 40, 9999, { isStatic: true, isFloor: true, render: { fillStyle: '#222' } });
+                Composite.add(engine.world, [l, r]);
+            }
+
+            const mouse = Mouse.create(render.canvas);
+            mouseConstraint = MouseConstraint.create(engine, { mouse: mouse, constraint: { stiffness: 0.1, render: { visible: false } } });
+            Composite.add(engine.world, mouseConstraint);
+
+            Events.on(engine, 'collisionStart', (e) => {
+                e.pairs.forEach(pair => {
+                    const speed = Math.max(pair.bodyA.speed, pair.bodyB.speed);
+                    entities.forEach(ent => { if ((pair.bodyA === ent.body || pair.bodyB === ent.body) && speed > 22) kill(ent); });
+                });
+            });
+
+            Events.on(mouseConstraint, 'mousedown', () => {
+                const b = mouseConstraint.body;
+                if (b && b.isStatic && !b.isFloor) { Body.setStatic(b, false); b.render.fillStyle = b.oldColor || '#666'; }
+            });
+
+            Events.on(engine, 'beforeUpdate', () => {
+                if (isPaused) return;
+                entities.forEach(ent => {
+                    if (ent.alive) {
+                        Body.setPosition(ent.weapon, ent.body.position);
+                        Body.setAngle(ent.body, 0);
+                        if (ent.isPlayer) {
+                            let moving = false;
+                            if (keys['KeyA']) { Body.setVelocity(ent.body, { x: -2.4, y: ent.body.velocity.y }); moving = true; }
+                            if (keys['KeyD']) { Body.setVelocity(ent.body, { x: 2.4, y: ent.body.velocity.y }); moving = true; }
+                            if (keys['Space'] && Math.abs(ent.body.velocity.y) < 0.2) Body.setVelocity(ent.body, { x: ent.body.velocity.x, y: -7 });
+                            if (moving && Math.abs(ent.body.velocity.y) < 0.2 && Date.now() - lastStepTime > 400) { playStep(); lastStepTime = Date.now(); }
+                            Body.setAngle(ent.weapon, Math.atan2(mouse.position.y - ent.body.position.y, mouse.position.x - ent.body.position.x));
+                        }
+                    }
+                });
+
+                if (mouseConstraint.body && playerEnt.alive) {
+                    if (!beamActive) { startLaser(); beamActive = true; }
+                    if (laserOsc) laserOsc.frequency.value = 130 + Math.random() * 20;
+                } else if (beamActive) { stopLaser(); beamActive = false; }
+            });
+
+            Events.on(render, 'afterRender', () => {
+                if (mouseConstraint.body && playerEnt.alive) {
+                    const ctx = render.context, target = mouseConstraint.body.position;
+                    ctx.beginPath(); ctx.moveTo(playerEnt.weapon.position.x, playerEnt.weapon.position.y); ctx.lineTo(target.x, target.y);
+                    ctx.strokeStyle = `rgba(255, ${120 + Math.random() * 80}, 0, 0.8)`; ctx.lineWidth = 6; ctx.setLineDash([5, 8]);
+                    ctx.lineDashOffset = -Date.now() / 20; ctx.stroke();
+                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
+                }
+            });
+
+            Render.run(render); Runner.run(Runner.create(), engine);
+        }
+
+        const keys = {};
+        window.onkeydown = (e) => { 
+            keys[e.code] = true; 
+            if (e.code === 'KeyQ') toggleQMenu(); 
+            if (e.code === 'KeyP') { canSpawn = !canSpawn; document.getElementById('status').innerText = `SPAWNING: ${canSpawn ? 'ENABLED' : 'DISABLED'}`; }
+            if (e.code === 'KeyL' && mouseConstraint.body) {
+                const b = mouseConstraint.body;
+                if (!b.isStatic) { playFreeze(); b.oldColor = b.render.fillStyle; b.render.fillStyle = '#00f'; Body.setStatic(b, true); mouseConstraint.body = null; }
+            }
+        }
+        window.onkeyup = (e) => keys[e.code] = false;
+        function toggleQMenu() { isPaused = !isPaused; document.getElementById('q-menu').style.display = isPaused ? 'flex' : 'none'; }
+        function setSpawnType(t) { currentSpawnType = t; toggleQMenu(); }
+        window.oncontextmenu = (e) => e.preventDefault();
+        
+        window.addEventListener('mousedown', (e) => {
+            if(e.button === 0 && !isPaused && playerEnt.alive && canSpawn) {
+                const angle = playerEnt.weapon.angle;
+                const spawnX = playerEnt.body.position.x + Math.cos(angle) * 60;
+                const spawnY = playerEnt.body.position.y + Math.sin(angle) * 60;
+                if(currentSpawnType === 'dummy') createEntity(spawnX, spawnY, false);
+                else {
+                    let p = (currentSpawnType === 'box') ? Bodies.rectangle(spawnX, spawnY, 40, 40, {restitution: 0, friction: 0.5, render:{fillStyle:'#666'}}) : Bodies.rectangle(spawnX, spawnY, 120, 20, {mass:10, restitution: 0, render:{fillStyle:'#444'}});
+                    Composite.add(engine.world, p);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
