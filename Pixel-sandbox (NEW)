@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pixel Sandbox v3: Infinite Motion</title>
+    <style>
+        :root {
+            --bg: #020202;
+            --primary: #00ff66;
+            --primary-dim: #004411;
+            --ui-bg: rgba(0, 15, 0, 0.95);
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--bg);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--primary);
+            user-select: none;
+        }
+
+        canvas { display: block; image-rendering: pixelated; }
+
+        /* --- MENUS --- */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: radial-gradient(circle, #0a1a0a 0%, #000 100%);
+            z-index: 1000;
+        }
+
+        .panel {
+            background: var(--ui-bg);
+            border: 2px solid var(--primary);
+            padding: 40px;
+            width: 550px;
+            max-width: 90%;
+            box-shadow: 0 0 50px rgba(0, 255, 100, 0.15);
+            text-align: center;
+        }
+
+        .section-title {
+            font-size: 12px;
+            letter-spacing: 3px;
+            color: #55ff99;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--primary-dim);
+            padding-bottom: 5px;
+        }
+
+        /* --- CONTROLS --- */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        
+        .btn {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 15px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: 0.2s;
+        }
+
+        .btn:hover { background: var(--primary); color: #000; box-shadow: 0 0 20px var(--primary); }
+        .btn.active { background: #fff; color: #000; border-color: #fff; }
+
+        .input-row {
+            display: flex; justify-content: space-between;
+            align-items: center; margin: 10px 0;
+        }
+
+        input[type="color"] {
+            border: 1px solid var(--primary);
+            background: none; width: 50px; height: 30px; cursor: pointer;
+        }
+
+        /* --- HUD --- */
+        #hud {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: none;
+        }
+
+        .hud-element {
+            position: absolute; padding: 15px;
+            background: rgba(0,0,0,0.7);
+            border: 1px solid var(--primary-dim);
+            pointer-events: auto;
+        }
+
+        #weapon-info { bottom: 20px; right: 20px; text-align: right; min-width: 200px; border-right: 5px solid var(--primary); }
+        #stats-info { top: 20px; left: 20px; font-family: monospace; font-size: 12px; }
+
+        /* --- Q MENU --- */
+        #q-menu {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 80%; height: 75%; background: rgba(0,5,0,0.98);
+            border: 2px solid var(--primary); display: none;
+            flex-direction: column; padding: 25px; z-index: 2000;
+        }
+
+        #prop-scroll {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 15px; overflow-y: auto; margin-top: 20px;
+        }
+
+        .prop-btn {
+            border: 1px solid #222; background: #050505;
+            padding: 20px; text-align: center; cursor: pointer;
+        }
+        .prop-btn:hover { border-color: var(--primary); background: #001100; }
+
+        #toast {
+            position: absolute; bottom: 120px; width: 100%;
+            text-align: center; font-weight: bold; font-size: 24px;
+            color: #fff; opacity: 0; transition: 0.3s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="boot-layer" class="overlay">
+        <h1 style="font-size: 3.5rem; margin-bottom: 5px;">PIXEL SANDBOX</h1>
+        <p style="color: #666; margin-bottom: 30px;">PHYSICS_SLEEP: <span style="color:red">DISABLED</span></p>
+        
+        <div class="panel">
+            <div class="section-title">Avatar Personalization</div>
+            <div class="input-row">
+                <span>SUIT TINT:</span>
+                <input type="color" id="color-suit" value="#00ffff">
+            </div>
+            <div class="input-row">
+                <span>TOOL TINT:</span>
+                <input type="color" id="color-gun" value="#ff00ff">
+            </div>
+            <div class="input-row">
+                <span>TOP HAT COSMETIC:</span>
+                <button class="btn" id="hat-toggle" onclick="UI.toggleHat()" style="padding: 5px 15px;">OFF</button>
+            </div>
+
+            <div class="section-title" style="margin-top:30px;">Select Environment</div>
+            <div class="grid-2">
+                <button class="btn" onclick="EngineCore.start(0)">Construct</button>
+                <button class="btn" onclick="EngineCore.start(1)">The Divide</button>
+                <button class="btn" onclick="EngineCore.start(2)">High-Rise</button>
+                <button class="btn" onclick="EngineCore.start(3)">Testing Pit</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="pause-layer" class="overlay" style="display:none; background: rgba(0,0,0,0.8);">
+        <div class="panel">
+            <h2 style="margin-top:0;">SYSTEM PAUSED</h2>
+            <button class="btn" style="width:100%; margin: 10px 0;" onclick="UI.togglePause()">Resume Operations</button>
+            <button class="btn" style="width:100%; margin: 10px 0;" onclick="WorldData.cleanup()">Wipe All Props</button>
+            <button class="btn btn-red" style="width:100%; margin: 10px 0; border-color: #f33; color: #f33;" onclick="location.reload()">Return to Mainframe</button>
+        </div>
+    </div>
+
+    <div id="hud">
+        <div id="stats-info" class="hud-element">
+            OBJECTS: <span id="count-obj">0</span><br>
+            FPS: <span id="count-fps">60</span><br>
+            POS: <span id="count-pos">0, 0</span>
+        </div>
+        <div id="weapon-info" class="hud-element">
+            <div id="wpn-name" style="font-size: 22px; font-weight: bold;">PHYSICS GUN</div>
+            <div id="wpn-mode" style="font-size: 11px; color: #888;">READY TO MANIPULATE</div>
+        </div>
+        <div id="toast">SYSTEM UPDATED</div>
+    </div>
+
+    <div id="q-menu">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="margin:0;">PROP DATABASE</h2>
+            <button class="btn" onclick="UI.toggleQ()">CLOSE [Q]</button>
+        </div>
+        <div id="prop-scroll"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+    <script>
+        /**
+         * -----------------------------------------------------------------------
+         * PIXEL SANDBOX ENGINE v3.0
+         * -----------------------------------------------------------------------
+         */
+
+        const { Engine, Render, Runner, World, Bodies, Body, Composite, Constraint, Events, Mouse, MouseConstraint, Vector, Query } = Matter;
+
+        // --- GLOBAL STATE ---
+        const State = {
+            running: false,
+            paused: false,
+            qOpen: false,
+            mapId: 0,
+            weapon: 0, // 0: PhysGun, 1: LA-95
+            selectedProp: "Crate (Large)",
+            hasHat: false,
+            colors: { suit: '#00ffff', gun: '#ff00ff' },
+            keys: {}
+        };
+
+        const PropList = {
+            "Crate (Large)":  { w: 50, h: 50, m: 5, c: '#8B4513' },
+            "Steel Box":     { w: 40, h: 40, m: 25, c: '#708090' },
+            "I-Beam Long":   { w: 250, h: 20, m: 40, c: '#2F4F4F' },
+            "Concrete Slab": { w: 120, h: 30, m: 80, c: '#A9A9A9' },
+            "Oil Drum":      { w: 35, h: 55, m: 10, c: '#800000', explosive: true },
+            "Support Pillar":{ w: 20, h: 180, m: 30, c: '#444' },
+            "Bouncy Ball":   { r: 20, m: 2, c: '#FF69B4', bounce: 0.9 },
+            "Heavy Boulder": { r: 50, m: 300, c: '#555' },
+            "Glass Pane":    { w: 10, h: 100, m: 1, c: 'rgba(200,255,255,0.3)', fragile: true },
+            "NPC Dummy":     { w: 30, h: 60, m: 6, c: '#FFE0BD', type: 'npc' },
+            "Security Bot":  { w: 30, h: 60, m: 15, c: '#222', type: 'npc' },
+            "Gold Ingot":    { w: 30, h: 15, m: 120, c: '#FFD700' },
+            "Television":    { w: 40, h: 35, m: 8, c: '#111' },
+            "Office Chair":  { w: 35, h: 45, m: 4, c: '#333' }
+        };
+
+        // --- CORE ENGINE ---
+        const EngineCore = {
+            engine: null,
+            render: null,
+            runner: null,
+            player: null,
+            hat: null,
+            
+            start(mapId) {
+                State.mapId = mapId;
+                State.colors.suit = document.getElementById('color-suit').value;
+                State.colors.gun = document.getElementById('color-gun').value;
+                
+                document.getElementById('boot-layer').style.display = 'none';
+                document.getElementById('hud').style.display = 'block';
+
+                this.engine = Engine.create();
+                // CRITICAL: DISABLE PHYSICS SLEEPING
+                this.engine.enableSleeping = false; 
+                this.engine.world.gravity.y = 1.3;
+
+                this.render = Render.create({
+                    element: document.body,
+                    engine: this.engine,
+                    options: {
+                        width: window.innerWidth,
+                        height: window.innerHeight,
+                        wireframes: false,
+                        background: '#050505'
+                    }
+                });
+
+                WorldData.init(mapId);
+                this.spawnPlayer();
+                InputSystem.init();
+                
+                Runner.run(Runner.create(), this.engine);
+                Render.run(this.render);
+                
+                State.running = true;
+                UI.buildQ();
+                this.loop();
+            },
+
+            spawnPlayer() {
+                const x = window.innerWidth / 2;
+                const y = window.innerHeight - 200;
+                
+                this.player = Bodies.rectangle(x, y, 30, 64, {
+                    label: 'Player',
+                    friction: 0.1,
+                    frictionAir: 0.02,
+                    inertia: Infinity, // Keep upright
+                    render: { fillStyle: State.colors.suit, opacity: 1 } // Forced opacity 1
+                });
+
+                Composite.add(this.engine.world, this.player);
+
+                if (State.hasHat) {
+                    this.attachHat();
+                }
+            },
+
+            attachHat() {
+                const p = this.player.position;
+                this.hat = Bodies.rectangle(p.x, p.y - 40, 34, 15, {
+                    label: 'Cosmetic',
+                    render: { fillStyle: '#111' }
+                });
+                
+                // Top part of hat
+                const hatTop = Bodies.rectangle(p.x, p.y - 55, 20, 20, {
+                    label: 'Cosmetic',
+                    render: { fillStyle: '#111' }
+                });
+
+                const hatGroup = Body.create({
+                    parts: [this.hat, hatTop],
+                    label: 'PlayerHat'
+                });
+
+                const joint = Constraint.create({
+                    bodyA: this.player,
+                    bodyB: hatGroup,
+                    pointA: { x: 0, y: -35 },
+                    pointB: { x: 0, y: 10 },
+                    stiffness: 0.8,
+                    length: 0,
+                    render: { visible: false }
+                });
+
+                Composite.add(this.engine.world, [hatGroup, joint]);
+            },
+
+            loop() {
+                if (!State.running) return;
+                
+                if (!State.paused) {
+                    this.updatePlayer();
+                    VFX.update();
+                    UI.updateHUD();
+                }
+
+                requestAnimationFrame(() => this.loop());
+            },
+
+            updatePlayer() {
+                if (!this.player) return;
+                const moveSpeed = 6;
+                const jumpForce = 15;
+
+                let vel = this.player.velocity;
+
+                if (State.keys['KeyA']) Body.setVelocity(this.player, { x: -moveSpeed, y: vel.y });
+                else if (State.keys['KeyD']) Body.setVelocity(this.player, { x: moveSpeed, y: vel.y });
+                
+                if (State.keys['Space'] && Math.abs(vel.y) < 0.1) {
+                    Body.setVelocity(this.player, { x: vel.x, y: -jumpForce });
+                    Audio.play(200, 'sine', 0.1);
+                }
+
+                // Prevent player rotation even if hit hard
+                Body.setAngle(this.player, 0);
+                
+                // Keep everything awake
+                const all = Composite.allBodies(this.engine.world);
+                all.forEach(b => b.sleepCounter = 0);
+            }
+        };
+
+        // --- MAP DATA ---
+        const WorldData = {
+            init(id) {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                const wallOpts = { isStatic: true, render: { fillStyle: '#1a1a1a' }, label: 'MapGeo' };
+
+                let bodies = [];
+                // Floor
+                bodies.push(Bodies.rectangle(w/2, h+40, w*10, 100, wallOpts));
+                
+                if (id === 0) { // Construct
+                    bodies.push(Bodies.rectangle(w/2 - 300, h - 100, 200, 40, wallOpts));
+                    bodies.push(Bodies.rectangle(w/2 + 300, h - 250, 200, 40, wallOpts));
+                } else if (id === 1) { // The Divide
+                    bodies.push(Bodies.rectangle(200, h - 300, 400, 50, wallOpts));
+                    bodies.push(Bodies.rectangle(w - 200, h - 300, 400, 50, wallOpts));
+                    bodies.push(Bodies.rectangle(w/2, h + 500, w/2, 100, wallOpts));
+                } else if (id === 2) { // High-Rise
+                    for(let i=0; i<5; i++) {
+                        bodies.push(Bodies.rectangle(w/2, h - (i * 200) - 100, 600 - (i*80), 30, wallOpts));
+                    }
+                } else if (id === 3) { // Pit
+                    bodies.push(Bodies.rectangle(100, h/2, 50, h, wallOpts));
+                    bodies.push(Bodies.rectangle(w-100, h/2, 50, h, wallOpts));
+                }
+
+                Composite.add(EngineCore.engine.world, bodies);
+            },
+
+            cleanup() {
+                const all = Composite.allBodies(EngineCore.engine.world);
+                const toRemove = all.filter(b => b.label === 'Prop' || b.label === 'VFX');
+                Composite.remove(EngineCore.engine.world, toRemove);
+                UI.toast("DATABASE PURGED");
+            }
+        };
+
+        // --- WEAPONS SYSTEM ---
+        const WeaponCore = {
+            mConstraint: null,
+
+            setup() {
+                const mouse = Mouse.create(EngineCore.render.canvas);
+                this.mConstraint = MouseConstraint.create(EngineCore.engine, {
+                    mouse: mouse,
+                    constraint: { stiffness: 0.1, render: { visible: false } }
+                });
+                Composite.add(EngineCore.engine.world, this.mConstraint);
+            },
+
+            fire() {
+                if (State.paused || State.qOpen) return;
+                const mPos = this.mConstraint.mouse.position;
+
+                if (State.weapon === 0) { // PhysGun
+                    const hit = Query.point(Composite.allBodies(EngineCore.engine.world), mPos)[0];
+                    if (!hit) this.spawn();
+                } else {
+                    this.fireLA95();
+                }
+            },
+
+            spawn() {
+                const mPos = this.mConstraint.mouse.position;
+                const data = PropList[State.selectedProp];
+                let b;
+
+                const opts = {
+                    label: 'Prop',
+                    render: { fillStyle: data.c },
+                    restitution: data.bounce || 0.1,
+                    mass: data.m
+                };
+
+                if (data.r) b = Bodies.circle(mPos.x, mPos.y, data.r, opts);
+                else b = Bodies.rectangle(mPos.x, mPos.y, data.w, data.h, opts);
+
+                Composite.add(EngineCore.engine.world, b);
+                Audio.play(400, 'triangle', 0.05);
+            },
+
+            fireLA95() {
+                const start = EngineCore.player.position;
+                const end = this.mConstraint.mouse.position;
+                
+                Audio.play(1000, 'sawtooth', 0.2);
+                VFX.beam(start, end, State.colors.gun);
+
+                const targets = Query.ray(Composite.allBodies(EngineCore.engine.world), start, end);
+                targets.forEach(t => {
+                    const b = t.body;
+                    if (b.isStatic || b.label === 'Player') return;
+
+                    VFX.explosion(b.position, b.render.fillStyle);
+                    
+                    // Area force blast
+                    const all = Composite.allBodies(EngineCore.engine.world);
+                    all.forEach(other => {
+                        if (other.isStatic) return;
+                        const dist = Vector.magnitude(Vector.sub(other.position, b.position));
+                        if (dist < 300) {
+                            const force = (300 - dist) / 300 * 0.5;
+                            const dir = Vector.normalise(Vector.sub(other.position, b.position));
+                            Body.applyForce(other, other.position, Vector.mult(dir, force));
+                        }
+                    });
+
+                    Composite.remove(EngineCore.engine.world, b);
+                });
+            }
+        };
+
+        // --- AUDIO ENGINE ---
+        const Audio = {
+            ctx: null,
+            init() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            play(freq, type, dur) {
+                if (!this.ctx) this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + dur);
+            }
+        };
+
+        // --- VISUAL EFFECTS ---
+        const VFX = {
+            parts: [],
+            beams: [],
+
+            explosion(pos, color) {
+                for(let i=0; i<20; i++) {
+                    this.parts.push({
+                        x: pos.x, y: pos.y,
+                        vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15,
+                        life: 1.0, color: color, size: Math.random()*8
+                    });
+                }
+                Audio.play(60, 'square', 0.4);
+            },
+
+            beam(s, e, c) {
+                this.beams.push({ s: {...s}, e: {...e}, c: c, life: 1.0 });
+            },
+
+            update() {
+                const ctx = EngineCore.render.context;
+                // Draw particles
+                for(let i=this.parts.length-1; i>=0; i--) {
+                    let p = this.parts[i];
+                    p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+                    if (p.life <= 0) { this.parts.splice(i,1); continue; }
+                    ctx.globalAlpha = p.life;
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.size, p.size);
+                }
+                // Draw beams
+                for(let i=this.beams.length-1; i>=0; i--) {
+                    let b = this.beams[i];
+                    b.life -= 0.1;
+                    if (b.life <= 0) { this.beams.splice(i,1); continue; }
+                    ctx.strokeStyle = b.c;
+                    ctx.lineWidth = 4 * b.life;
+                    ctx.beginPath();
+                    ctx.moveTo(b.s.x, b.s.y);
+                    ctx.lineTo(b.e.x, b.e.y);
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = 1.0;
+                
+                // Physics Gun Beam
+                if (State.weapon === 0 && WeaponCore.mConstraint.body) {
+                    const b = WeaponCore.mConstraint.body;
+                    const p = EngineCore.player.position;
+                    ctx.strokeStyle = State.colors.gun;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(b.position.x, b.position.y); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+        };
+
+        // --- UI & INPUT ---
+        const UI = {
+            buildQ() {
+                const grid = document.getElementById('prop-scroll');
+                for (let key in PropList) {
+                    let d = document.createElement('div');
+                    d.className = 'prop-btn';
+                    d.innerText = key;
+                    d.onclick = () => { State.selectedProp = key; this.toggleQ(); this.toast("SELECTED: " + key); };
+                    grid.appendChild(d);
+                }
+            },
+            toggleQ() {
+                State.qOpen = !State.qOpen;
+                document.getElementById('q-menu').style.display = State.qOpen ? 'flex' : 'none';
+            },
+            togglePause() {
+                State.paused = !State.paused;
+                document.getElementById('pause-layer').style.display = State.paused ? 'flex' : 'none';
+            },
+            toggleHat() {
+                State.hasHat = !State.hasHat;
+                const b = document.getElementById('hat-toggle');
+                b.innerText = State.hasHat ? "ON" : "OFF";
+                b.classList.toggle('active', State.hasHat);
+            },
+            toast(msg) {
+                const t = document.getElementById('toast');
+                t.innerText = msg; t.style.opacity = 1;
+                setTimeout(() => t.style.opacity = 0, 1500);
+            },
+            updateHUD() {
+                document.getElementById('count-obj').innerText = Composite.allBodies(EngineCore.engine.world).length;
+                const p = EngineCore.player.position;
+                document.getElementById('count-pos').innerText = `${Math.round(p.x)}, ${Math.round(p.y)}`;
+                
+                const w = (State.weapon === 0) ? "PHYSICS GUN" : "LA-95 OBLITERATOR";
+                document.getElementById('wpn-name').innerText = w;
+                document.getElementById('wpn-name').style.color = (State.weapon === 0) ? State.colors.suit : State.colors.gun;
+            }
+        };
+
+        const InputSystem = {
+            init() {
+                window.onkeydown = (e) => {
+                    State.keys[e.code] = true;
+                    if (e.code === 'KeyQ') UI.toggleQ();
+                    if (e.code === 'KeyP') UI.togglePause();
+                    if (e.code === 'KeyM') {
+                        State.weapon = State.weapon === 0 ? 1 : 0;
+                        UI.toast("WEAPON SWAP");
+                    }
+                    if (e.code === 'KeyL') {
+                        const m = WeaponCore.mConstraint.mouse.position;
+                        const hit = Query.point(Composite.allBodies(EngineCore.engine.world), m)[0];
+                        if (hit && !hit.isStatic) {
+                            Body.setStatic(hit, !hit.isStatic);
+                            UI.toast(hit.isStatic ? "FROZEN" : "UNFROZEN");
+                        }
+                    }
+                };
+                window.onkeyup = (e) => State.keys[e.code] = false;
+                window.onmousedown = () => WeaponCore.fire();
+                WeaponCore.setup();
+            }
+        };
+
+    </script>
+</body>
+</html>
